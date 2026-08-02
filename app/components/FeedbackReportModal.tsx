@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   X,
   Download,
@@ -69,7 +69,7 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
     }
   }, []);
 
-  const fetchFeedbacks = async () => {
+  const fetchFeedbacks = useCallback(async () => {
     setLoading(true);
     try {
       let url = `/api/feedback?range=${rangeFilter}`;
@@ -90,13 +90,13 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [rangeFilter, startDate, endDate]);
 
   useEffect(() => {
     if (isOpen && verifiedOwnerEmail) {
       fetchFeedbacks();
     }
-  }, [isOpen, rangeFilter, startDate, endDate, verifiedOwnerEmail]);
+  }, [isOpen, verifiedOwnerEmail, fetchFeedbacks]);
 
   const handleVerifyOwner = (e: React.FormEvent) => {
     e.preventDefault();

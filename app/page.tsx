@@ -241,7 +241,7 @@ export default function FeedbackPage() {
                 <div className="pt-1">
                   <span className="text-slate-500 font-medium block mb-0.5">Comments:</span>
                   <p className="text-slate-700 bg-slate-50 p-2 rounded-lg text-[11px] sm:text-xs italic border border-slate-200/80 leading-relaxed">
-                    "{submittedData.feedback}"
+                    &quot;{submittedData.feedback}&quot;
                   </p>
                 </div>
               )}
