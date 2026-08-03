@@ -4,7 +4,7 @@ import path from "path";
 
 const DATA_FILE = path.join(process.cwd(), "data", "feedbacks.json");
 
-interface FeedbackItem {
+export interface FeedbackItem {
   id: string;
   name: string;
   email: string;
@@ -42,6 +42,7 @@ function saveLocalFeedbacks(items: FeedbackItem[]) {
   }
 }
 
+// POST endpoint - Post data (Create feedback)
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -88,7 +89,7 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
     };
 
-    // 1. Save persistent local copy
+    // 1. Save local copy
     const current = getLocalFeedbacks();
     current.unshift(newFeedback);
     saveLocalFeedbacks(current);
@@ -121,22 +122,23 @@ export async function POST(request: Request) {
   }
 }
 
+// GET endpoint - Pull data (List all / Filter by date range) & View data (Single item by ID)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
   const range = searchParams.get("range") || "all";
   const customStart = searchParams.get("startDate");
   const customEnd = searchParams.get("endDate");
 
-  // Always start with local file store so no data is lost
   let sourceFeedbacks = getLocalFeedbacks();
 
-  // If Google Sheet WebApp URL is configured, attempt live fetch
+  // Live fetch from Google Sheet WebApp
   const googleSheetUrl = process.env.GOOGLE_SHEET_WEBAPP_URL;
   if (googleSheetUrl && googleSheetUrl.trim().length > 0) {
     try {
       const gRes = await fetch(googleSheetUrl, {
         method: "GET",
-        headers: { "Accept": "application/json" },
+        headers: { Accept: "application/json" },
         cache: "no-store",
         redirect: "follow",
       });
@@ -145,11 +147,12 @@ export async function GET(request: Request) {
         const text = await gRes.text();
         try {
           const gData = JSON.parse(text);
-          if (gData.feedbacks && Array.isArray(gData.feedbacks) && gData.feedbacks.length > 0) {
+          if (gData.success && Array.isArray(gData.feedbacks)) {
             sourceFeedbacks = gData.feedbacks;
+            saveLocalFeedbacks(sourceFeedbacks); // Sync local copy with live Google Sheet
           }
         } catch (pErr) {
-          // Response was HTML (e.g. 404 or authorization page from Google)
+          // Response was not valid JSON
         }
       }
     } catch (gErr) {
@@ -157,8 +160,24 @@ export async function GET(request: Request) {
     }
   }
 
+  // View Data for single item by ID
+  if (id) {
+    const singleItem = sourceFeedbacks.find((item) => item.id === id);
+    if (!singleItem) {
+      return NextResponse.json(
+        { success: false, message: `Feedback with ID ${id} not found` },
+        { status: 404 }
+      );
+    }
+    return NextResponse.json({
+      success: true,
+      feedback: singleItem,
+      data: singleItem,
+    });
+  }
+
+  // Pull Data with Date Filtering
   const now = new Date();
-  
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
   const endOfYesterday = new Date(startOfToday.getTime() - 1);
@@ -198,10 +217,20 @@ export async function GET(request: Request) {
   });
 }
 
+// DELETE endpoint - Delete data by ID
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
+    let id = searchParams.get("id");
+
+    if (!id) {
+      try {
+        const body = await request.json();
+        id = body.id;
+      } catch (e) {
+        // Body was empty
+      }
+    }
 
     if (!id) {
       return NextResponse.json(
@@ -231,6 +260,96 @@ export async function DELETE(request: Request) {
     return NextResponse.json({
       success: true,
       message: `Feedback ${id} deleted successfully`,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, message: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT endpoint - Update data
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, name, email, mobile, fuelType, rating, feedback } = body;
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, message: "Feedback ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const errors: Record<string, string> = {};
+
+    if (!name || name.trim().length === 0) {
+      errors.name = "Customer name is required";
+    }
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      errors.email = "Valid email address is required";
+    }
+
+    if (!mobile || !/^[6-9]\d{9}$/.test(mobile.trim())) {
+      errors.mobile = "Please enter a valid 10-digit mobile number";
+    }
+
+    if (!fuelType || fuelType === "-- Select Fuel Type --") {
+      errors.fuelType = "Please select a fuel type";
+    }
+
+    if (!rating || rating === "-- Select Rating --") {
+      errors.rating = "Please select a service rating";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      return NextResponse.json(
+        { success: false, errors, message: "Validation failed" },
+        { status: 400 }
+      );
+    }
+
+    const current = getLocalFeedbacks();
+    const index = current.findIndex((item) => item.id === id);
+
+    const updatedFeedback: FeedbackItem = {
+      id,
+      name: name.trim(),
+      email: email.trim(),
+      mobile: mobile.trim(),
+      fuelType,
+      rating,
+      feedback: feedback ? feedback.trim() : "",
+      createdAt: index !== -1 ? current[index].createdAt : new Date().toISOString(),
+    };
+
+    if (index !== -1) {
+      current[index] = updatedFeedback;
+    } else {
+      current.unshift(updatedFeedback);
+    }
+    saveLocalFeedbacks(current);
+
+    const googleSheetUrl = process.env.GOOGLE_SHEET_WEBAPP_URL;
+    if (googleSheetUrl && googleSheetUrl.trim().length > 0) {
+      try {
+        await fetch(googleSheetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: "update", ...updatedFeedback }),
+          redirect: "follow",
+        });
+      } catch (gErr) {
+        console.error("Failed to sync update to Google Sheet WebApp:", gErr);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `Feedback ${id} updated successfully`,
+      data: updatedFeedback,
     });
   } catch (error) {
     return NextResponse.json(

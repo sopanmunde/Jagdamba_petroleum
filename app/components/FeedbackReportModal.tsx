@@ -11,12 +11,21 @@ import {
   TrendingUp,
   Fuel,
   Trash2,
+  Pencil,
+  Plus,
+  Eye,
+  Search,
   Lock,
   ShieldCheck,
   KeyRound,
   LogOut,
   Mail,
   AlertCircle,
+  Save,
+  User,
+  Phone,
+  Star,
+  MessageSquare,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -40,12 +49,29 @@ interface Props {
   onClose: () => void;
 }
 
+const FUEL_OPTIONS = [
+  "Petrol",
+  "Diesel",
+  "Speed Petrol",
+  "CNG",
+  "EV Charging",
+];
+
+const RATING_OPTIONS = [
+  "5 Star - Excellent",
+  "4 Star - Good",
+  "3 Star - Average",
+  "2 Star - Fair",
+  "1 Star - Poor",
+];
+
 export default function FeedbackReportModal({ isOpen, onClose }: Props) {
   const [rangeFilter, setRangeFilter] = useState<
     "today" | "yesterday" | "week" | "month" | "year" | "all" | "custom"
   >("all");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
@@ -56,6 +82,32 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
   const [ownerInputEmail, setOwnerInputEmail] = useState<string>("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
+
+  // Modal Sub-States for CRUD (Create, Edit, View)
+  const [editingItem, setEditingItem] = useState<FeedbackItem | null>(null);
+  const [viewingItem, setViewingItem] = useState<FeedbackItem | null>(null);
+  const [isAddingNew, setIsAddingNew] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Form State for Create / Edit
+  const [formData, setFormData] = useState<{
+    id?: string;
+    name: string;
+    email: string;
+    mobile: string;
+    fuelType: string;
+    rating: string;
+    feedback: string;
+  }>({
+    name: "",
+    email: "",
+    mobile: "",
+    fuelType: "",
+    rating: "",
+    feedback: "",
+  });
+
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   // Check stored owner authentication on mount
   useEffect(() => {
@@ -109,7 +161,6 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
       return;
     }
 
-    // Auto-format username to email if @ is omitted (e.g. owner -> owner@example.com)
     if (!email.includes("@")) {
       email = `${email}@gmail.com`;
     }
@@ -166,6 +217,7 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
     localStorage.removeItem("jagdamba_owner_email");
   };
 
+  // Delete handler
   const handleDeleteFeedback = async (id: string, name: string) => {
     if (!confirm(`Are you sure you want to delete feedback ${id} (${name})?`)) {
       return;
@@ -191,17 +243,119 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
     }
   };
 
+  // Open Edit Modal
+  const handleOpenEdit = (item: FeedbackItem) => {
+    setEditingItem(item);
+    setFormData({
+      id: item.id,
+      name: item.name,
+      email: item.email,
+      mobile: item.mobile,
+      fuelType: item.fuelType,
+      rating: item.rating,
+      feedback: item.feedback,
+    });
+    setFormErrors({});
+  };
+
+  // Open Create Modal
+  const handleOpenCreate = () => {
+    setIsAddingNew(true);
+    setFormData({
+      name: "",
+      email: "",
+      mobile: "",
+      fuelType: "",
+      rating: "",
+      feedback: "",
+    });
+    setFormErrors({});
+  };
+
+  const validateForm = () => {
+    const errors: Record<string, string> = {};
+    if (!formData.name.trim()) errors.name = "Customer name is required";
+    if (!formData.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+      errors.email = "Valid email address is required";
+    }
+    if (!formData.mobile.trim() || !/^[6-9]\d{9}$/.test(formData.mobile.trim())) {
+      errors.mobile = "10-digit mobile number required";
+    }
+    if (!formData.fuelType) errors.fuelType = "Select fuel type";
+    if (!formData.rating) errors.rating = "Select rating";
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Submit Save for Edit / Create
+  const handleSaveForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+
+    setIsSaving(true);
+    try {
+      if (editingItem) {
+        // PUT Request
+        const res = await fetch("/api/feedback", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData),
+        });
+        const result = await res.json();
+        if (result.success && result.data) {
+          setFeedbacks((prev) =>
+            prev.map((item) => (item.id === editingItem.id ? result.data : item))
+          );
+          setEditingItem(null);
+        } else {
+          alert(result.message || "Failed to update record");
+        }
+      } else if (isAddingNew) {
+        // POST Request
+        const res = await fetch("/api/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData),
+        });
+        const result = await res.json();
+        if (result.success && result.data) {
+          setFeedbacks((prev) => [result.data, ...prev]);
+          setIsAddingNew(false);
+        } else {
+          alert(result.message || "Failed to create record");
+        }
+      }
+    } catch (err) {
+      console.error("Save error:", err);
+      alert("An error occurred while saving. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (!isOpen) return null;
 
+  // Filter feedbacks by search query
+  const filteredFeedbacks = feedbacks.filter((item) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    return (
+      item.id.toLowerCase().includes(q) ||
+      item.name.toLowerCase().includes(q) ||
+      item.email.toLowerCase().includes(q) ||
+      item.mobile.includes(q) ||
+      item.fuelType.toLowerCase().includes(q) ||
+      item.rating.toLowerCase().includes(q) ||
+      item.feedback.toLowerCase().includes(q)
+    );
+  });
+
   // Statistics calculation
-  const totalCount = feedbacks.length;
-  const ratingCounts: Record<string, number> = {};
+  const totalCount = filteredFeedbacks.length;
   const fuelCounts: Record<string, number> = {};
 
-  feedbacks.forEach((item) => {
+  filteredFeedbacks.forEach((item) => {
     fuelCounts[item.fuelType] = (fuelCounts[item.fuelType] || 0) + 1;
-    const rStar = item.rating ? item.rating.split(" ")[0] : "5";
-    ratingCounts[rStar] = (ratingCounts[rStar] || 0) + 1;
   });
 
   const topFuel = Object.keys(fuelCounts).reduce(
@@ -282,7 +436,7 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
       );
 
       // Table Setup
-      const tableData = feedbacks.map((item) => [
+      const tableData = filteredFeedbacks.map((item) => [
         item.id,
         new Date(item.createdAt).toLocaleDateString("en-IN", {
           day: "2-digit",
@@ -380,7 +534,7 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
             </div>
             <div>
               <h2 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <span>Feedback Reports & PDF Export</span>
+                <span>Feedback CRUD & PDF Export</span>
                 {verifiedOwnerEmail && (
                   <Badge variant="success" className="bg-emerald-500/30 text-emerald-100 border-emerald-400/40 font-normal gap-1 text-[10px] sm:text-xs">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
@@ -389,7 +543,7 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
                 )}
               </h2>
               <p className="text-red-100 text-[11px] sm:text-sm">
-                Restricted to authorized Owner Email ID for report viewing & PDF download
+                Create, Read, Update, Delete feedback records & export reports
               </p>
             </div>
           </div>
@@ -412,7 +566,7 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
               Owner Access Verification
             </h3>
             <p className="text-slate-600 text-xs sm:text-sm max-w-md mb-5 sm:mb-6">
-              PDF downloads and customer feedback data are restricted. Please enter your registered <strong className="text-slate-800">Owner Email ID</strong> to gain view and download access.
+              PDF downloads and customer feedback management are restricted. Please enter your registered <strong className="text-slate-800">Owner Email ID</strong> to gain full CRUD access.
             </p>
 
             <form onSubmit={handleVerifyOwner} className="w-full max-w-sm space-y-3.5 sm:space-y-4">
@@ -450,14 +604,14 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
                 ) : (
                   <>
                     <KeyRound className="w-4 h-4" />
-                    Verify Owner & Unlock PDF Access
+                    Verify Owner & Unlock Dashboard
                   </>
                 )}
               </Button>
             </form>
 
             <div className="mt-5 sm:mt-6 text-[10px] sm:text-xs text-slate-400">
-              Jagdamba Petroleum • Security Protected PDF Access
+              Jagdamba Petroleum • Security Protected Admin Access
             </div>
           </div>
         ) : (
@@ -481,13 +635,15 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
               </button>
             </div>
 
-            {/* Date Filter Bar */}
+            {/* Date Filter & Search Bar */}
             <div className="p-3.5 sm:p-5 bg-slate-50 border-b border-slate-200 space-y-2.5 sm:space-y-3">
-              <div className="flex items-center gap-2">
-                <Filter className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-500" />
-                <span className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Select Period:
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Filter className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-500" />
+                  <span className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Select Period:
+                  </span>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -569,13 +725,34 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
 
               {/* Feedback Preview Data Table */}
               <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                
+                {/* Search & Actions Bar */}
                 <div className="px-3.5 py-2.5 sm:px-4 sm:py-3 bg-slate-100 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2">
-                  <h3 className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    Matching Feedbacks ({feedbacks.length})
-                  </h3>
-                  <span className="text-[11px] sm:text-xs text-slate-500">
-                    Filtered by {filterLabels[rangeFilter]}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Matching Feedbacks ({filteredFeedbacks.length})
+                    </h3>
+                  </div>
+
+                  {/* Search Input Box */}
+                  <div className="relative min-w-[200px] sm:min-w-[260px]">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search name, mobile, fuel, ID..."
+                      className="w-full pl-8 pr-3 py-1 text-xs bg-white border border-slate-300 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {loading ? (
@@ -583,13 +760,15 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
                     <Loader2 className="w-6 h-6 animate-spin text-[#D9232D]" />
                     <span className="text-xs font-medium">Loading feedback entries...</span>
                   </div>
-                ) : feedbacks.length === 0 ? (
+                ) : filteredFeedbacks.length === 0 ? (
                   <div className="py-12 text-center text-slate-500 text-xs">
-                    No feedback records found for this date filter.
+                    {searchQuery
+                      ? "No records match your search criteria."
+                      : "No feedback records found for this date filter."}
                   </div>
                 ) : (
                   <div className="max-h-[300px] overflow-y-auto overflow-x-auto custom-scrollbar">
-                    <table className="w-full min-w-[640px] text-left text-xs">
+                    <table className="w-full min-w-[680px] text-left text-xs">
                       <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 sticky top-0">
                         <tr>
                           <th className="px-3 py-2.5">Ref ID</th>
@@ -599,11 +778,11 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
                           <th className="px-3 py-2.5">Fuel</th>
                           <th className="px-3 py-2.5">Rating</th>
                           <th className="px-3 py-2.5">Feedback</th>
-                          <th className="px-3 py-2.5 text-center">Action</th>
+                          <th className="px-3 py-2.5 text-center">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {feedbacks.map((item) => (
+                        {filteredFeedbacks.map((item) => (
                           <tr key={item.id} className="hover:bg-slate-50/80 transition">
                             <td className="px-3 py-2 font-mono font-medium text-slate-900">
                               {item.id}
@@ -624,22 +803,43 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
                             <td className="px-3 py-2 text-amber-600 font-medium whitespace-nowrap">
                               {item.rating}
                             </td>
-                            <td className="px-3 py-2 max-w-[180px] truncate text-slate-600">
+                            <td className="px-3 py-2 max-w-[160px] truncate text-slate-600">
                               {item.feedback || "-"}
                             </td>
                             <td className="px-3 py-2 text-center">
-                              <button
-                                onClick={() => handleDeleteFeedback(item.id, item.name)}
-                                disabled={deletingId === item.id}
-                                title="Delete Record"
-                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer disabled:opacity-50"
-                              >
-                                {deletingId === item.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin text-red-600" />
-                                ) : (
-                                  <Trash2 className="w-4 h-4" />
-                                )}
-                              </button>
+                              <div className="flex items-center justify-center gap-1">
+                                {/* View Action Button */}
+                                <button
+                                  onClick={() => setViewingItem(item)}
+                                  title="View Details"
+                                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Edit Action Button */}
+                                <button
+                                  onClick={() => handleOpenEdit(item)}
+                                  title="Edit Record"
+                                  className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Delete Action Button */}
+                                <button
+                                  onClick={() => handleDeleteFeedback(item.id, item.name)}
+                                  disabled={deletingId === item.id}
+                                  title="Delete Record"
+                                  className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer disabled:opacity-50"
+                                >
+                                  {deletingId === item.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" />
+                                  ) : (
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -663,7 +863,7 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
 
               <Button
                 onClick={handleDownloadPDF}
-                disabled={isGeneratingPdf || feedbacks.length === 0}
+                disabled={isGeneratingPdf || filteredFeedbacks.length === 0}
                 variant="gradient"
                 size="sm"
                 className="w-full sm:w-auto gap-2 text-xs font-bold"
@@ -676,7 +876,7 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
                 ) : (
                   <>
                     <Download className="w-4 h-4" />
-                    Download PDF Report ({feedbacks.length})
+                    Download PDF Report ({filteredFeedbacks.length})
                   </>
                 )}
               </Button>
@@ -685,6 +885,224 @@ export default function FeedbackReportModal({ isOpen, onClose }: Props) {
         )}
 
       </div>
+
+      {/* VIEW DETAILS MODAL SUB-DIALOG */}
+      {viewingItem && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Badge variant="default" className="bg-red-50 text-red-600 border-red-100 font-mono text-xs">
+                  {viewingItem.id}
+                </Badge>
+                <h3 className="font-bold text-slate-800 text-sm">Feedback Details</h3>
+              </div>
+              <button
+                onClick={() => setViewingItem(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-700">
+              <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                <span className="text-slate-500 font-medium">Customer Name:</span>
+                <span className="font-bold text-slate-900">{viewingItem.name}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                <span className="text-slate-500 font-medium">Mobile Number:</span>
+                <span className="font-semibold text-slate-800">{viewingItem.mobile}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                <span className="text-slate-500 font-medium">Email Address:</span>
+                <span className="text-slate-800">{viewingItem.email}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                <span className="text-slate-500 font-medium">Fuel Type:</span>
+                <Badge variant="default" className="bg-slate-100 text-red-600 font-bold text-[10px]">
+                  {viewingItem.fuelType}
+                </Badge>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                <span className="text-slate-500 font-medium">Service Rating:</span>
+                <span className="font-bold text-amber-600">{viewingItem.rating}</span>
+              </div>
+              <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                <span className="text-slate-500 font-medium">Created Date:</span>
+                <span>{new Date(viewingItem.createdAt).toLocaleString("en-IN")}</span>
+              </div>
+              <div className="pt-2">
+                <span className="text-slate-500 font-medium block mb-1">Customer Feedback:</span>
+                <p className="bg-slate-50 p-3 rounded-xl border border-slate-200 italic text-slate-800 leading-relaxed">
+                  {viewingItem.feedback ? `"${viewingItem.feedback}"` : "No comments provided."}
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <Button onClick={() => setViewingItem(null)} variant="outline" size="sm" className="text-xs">
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CREATE & EDIT FORM MODAL SUB-DIALOG */}
+      {(editingItem || isAddingNew) && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl p-5 sm:p-6 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
+                  {editingItem ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                </div>
+                <h3 className="font-bold text-slate-800 text-base">
+                  {editingItem ? `Edit Feedback (${editingItem.id})` : "Add New Feedback Record"}
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingItem(null);
+                  setIsAddingNew(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveForm} className="space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Customer Name *</label>
+                  <Input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                    placeholder="Full Name"
+                    className="h-9 text-xs"
+                  />
+                  {formErrors.name && <p className="text-red-500 text-[10px] mt-0.5">{formErrors.name}</p>}
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Mobile Number *</label>
+                  <Input
+                    type="tel"
+                    value={formData.mobile}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        mobile: e.target.value.replace(/\D/g, "").slice(0, 10),
+                      }))
+                    }
+                    placeholder="10 digit mobile"
+                    maxLength={10}
+                    className="h-9 text-xs"
+                  />
+                  {formErrors.mobile && <p className="text-red-500 text-[10px] mt-0.5">{formErrors.mobile}</p>}
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Email Address *</label>
+                <Input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder="name@domain.com"
+                  className="h-9 text-xs"
+                />
+                {formErrors.email && <p className="text-red-500 text-[10px] mt-0.5">{formErrors.email}</p>}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Fuel Type *</label>
+                  <select
+                    value={formData.fuelType}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, fuelType: e.target.value }))}
+                    className="w-full h-9 rounded-xl border border-slate-300 px-3 text-xs text-slate-800 font-medium bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  >
+                    <option value="">-- Select Fuel --</option>
+                    {FUEL_OPTIONS.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                  {formErrors.fuelType && <p className="text-red-500 text-[10px] mt-0.5">{formErrors.fuelType}</p>}
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Rating *</label>
+                  <select
+                    value={formData.rating}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, rating: e.target.value }))}
+                    className="w-full h-9 rounded-xl border border-slate-300 px-3 text-xs text-slate-800 font-medium bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  >
+                    <option value="">-- Select Rating --</option>
+                    {RATING_OPTIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                  {formErrors.rating && <p className="text-red-500 text-[10px] mt-0.5">{formErrors.rating}</p>}
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Feedback Comments</label>
+                <textarea
+                  rows={3}
+                  value={formData.feedback}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, feedback: e.target.value }))}
+                  placeholder="Feedback notes..."
+                  className="w-full p-2.5 border border-slate-300 rounded-xl text-xs text-slate-800 resize-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditingItem(null);
+                    setIsAddingNew(false);
+                  }}
+                  className="text-xs"
+                >
+                  Cancel
+                </Button>
+
+                <Button
+                  type="submit"
+                  disabled={isSaving}
+                  variant="gradient"
+                  size="sm"
+                  className="text-xs font-bold gap-1.5"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>{editingItem ? "Update Record" : "Create Record"}</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

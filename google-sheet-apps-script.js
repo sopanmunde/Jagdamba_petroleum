@@ -108,6 +108,29 @@ function doPost(e) {
       return json_({ success: false, message: "ID not found: " + payload.id });
     }
 
+    // Handle update action
+    if (payload.action === "update" && payload.id) {
+      var data = sheet.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][1]) === String(payload.id)) {
+          var updatedRow = [
+            payload.createdAt || data[i][0],
+            payload.id,
+            payload.name || data[i][2],
+            payload.email || data[i][3],
+            payload.mobile || data[i][4],
+            payload.fuelType || data[i][5],
+            payload.rating || data[i][6],
+            payload.feedback !== undefined ? payload.feedback : data[i][7],
+          ];
+          sheet.getRange(i + 1, 1, 1, HEADERS.length).setValues([updatedRow]);
+          return json_({ success: true, message: "Updated " + payload.id, data: payload });
+        }
+      }
+      return json_({ success: false, message: "ID not found for update: " + payload.id });
+    }
+
+
     if (!payload.name && !payload.id) {
       return json_({ success: false, message: "No data payload received" });
     }
